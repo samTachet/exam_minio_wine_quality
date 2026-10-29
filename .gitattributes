@@ -1,0 +1,3 @@
+# Les scripts shell s'exécutent dans des conteneurs Linux : toujours en LF, même extraits sous Windows
+# (une ligne shebang en CRLF empêche le conteneur de démarrer).
+*.sh text eol=lf

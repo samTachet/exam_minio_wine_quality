@@ -1,9 +1,95 @@
+# Stack MLOps : MinIO (stockage objet) <- MLflow (suivi des expériences) <- pipeline (DVC)
+#
+# L'ordre de démarrage est imposé par des health checks, pas seulement par « démarré » :
+#   minio    healthy = serveur up ET buckets dvc-storage / mlflow-artifacts créés (voir init_minio.sh)
+#   mlflow   healthy = serveur de tracking qui répond sur /health
+#   pipeline démarre en dernier : dvc repro (entraîne et journalise dans MLflow) puis dvc push (vers MinIO)
+#
+# Identifiants : minioadmin/minioadmin sont imposés par le service `tests` ci-dessous. Acceptable
+# uniquement pour un examen en local ; ne jamais réutiliser de valeurs par défaut comme celles-ci ailleurs.
+
+x-s3-client-env: &s3-client-env
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  AWS_DEFAULT_REGION: us-east-1
+  # Endpoint utilisé par le client S3 d'artefacts de MLflow (côté serveur et côté client)
+  MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+
 services:
   pipeline:
+    build:
+      context: ./docker/pipeline
+      dockerfile: Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    environment:
+      <<: *s3-client-env
+      # Sans cette variable, stage05 (évaluation) journaliserait dans un dossier local ./mlruns
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      # Endpoint S3 utilisé par DVC (voir init_dvc.sh)
+      MINIO_ENDPOINT_URL: http://minio:9000
+      DVC_NO_ANALYTICS: "1"
+      # MLflow cherche un exécutable git pour journaliser le SHA du commit ; le conteneur n'en a pas (inoffensif, mais bruyant)
+      GIT_PYTHON_REFRESH: quiet
+    volumes:
+      # Le répertoire de travail du projet : dvc.yaml, src/, data/ ... et les sorties réécrites dedans
+      - .:/app
+    command: ["/usr/local/bin/init_dvc.sh"]
 
   minio:
+    build:
+      context: ./docker/minio
+      dockerfile: Dockerfile
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"       # API S3
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"   # console web
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      # Volume nommé : les objets survivent à `docker compose down` et sont effacés par `make clean` (down -v)
+      - minio_data:/data
+    healthcheck:
+      # init_minio.sh crée ce fichier une fois que l'API répond ET que les buckets existent
+      test: ["CMD-SHELL", "test -f /tmp/.minio-init-done"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
 
   mlflow:
+    build:
+      context: ./docker/mlflow
+      dockerfile: Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    environment:
+      <<: *s3-client-env
+    volumes:
+      # Contient la base SQLite de tracking (runs, paramètres, métriques, registre de modèles)
+      - mlflow_data:/mlflow
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - sqlite:////mlflow/mlflow.db
+      # Racine du bucket (sans sous-chemin) : les artefacts vont dans <bucket>/<experiment_id>/<run_id>/artifacts/
+      - --default-artifact-root
+      - s3://mlflow-artifacts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
 
   tests:
       build:
@@ -20,3 +106,7 @@ services:
         - MINIO_DATA_BUCKET=dvc-storage
         - MINIO_MLFLOW_BUCKET=mlflow-artifacts
         - MLFLOW_TRACKING_URI="http://mlflow:5000"
+
+volumes:
+  minio_data:
+  mlflow_data:

@@ -1,0 +1,19 @@
+# Dépendances du conteneur du pipeline DVC (ce que src/pipeline/ importe réellement,
+# pas tout le requirements.txt racine, qui embarque aussi notebook/fastapi/dagshub...).
+# Versions figées sur l'ensemble avec lequel cette stack a été construite et testée : sans figer, `pip`
+# passe silencieusement à des versions plus récentes (p. ex. scikit-learn change les scores d'une version à l'autre).
+# Python 3.11 (voir Dockerfile).
+dvc[s3]==3.67.1
+# Version du client = version du serveur (docker/mlflow/requirements.txt)
+mlflow==2.9.2
+# Requis par MLflow pour envoyer des artefacts vers MinIO (API S3) ; DVC utilise s3fs/aiobotocore à la place.
+# Doit rester compatible avec le botocore tiré par dvc[s3] (aiobotocore le fige très strictement).
+boto3==1.43.117
+pandas==2.3.3
+# mlflow 2.9.2 exige numpy<2
+numpy==1.26.4
+scikit-learn==1.9.1
+joblib==1.6.0
+PyYAML==6.0.3
+python-box==6.0.2
+ensure==1.0.2

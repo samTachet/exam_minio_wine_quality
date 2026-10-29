@@ -1,0 +1,10 @@
+# Versions figées sur l'ensemble avec lequel cette stack a été construite et testée (Python 3.11, voir Dockerfile).
+
+# Même version de MLflow que le client utilisé par le pipeline (docker/pipeline/requirements.txt, requirements.txt racine) :
+# un serveur de tracking et ses clients ne doivent pas diverger.
+mlflow==2.9.2
+# MLflow ne dépend pas de boto3, mais en a besoin pour lire/écrire des artefacts sur un stockage compatible S3 (MinIO).
+boto3==1.43.117
+# mlflow 2.9.2 déclare « sqlalchemy<3 » mais plante au démarrage avec SQLAlchemy 2.1+
+# (ImportError: cannot import name 'FallbackAsyncAdaptedQueuePool'). Rester en 2.0.x.
+sqlalchemy==2.0.55
